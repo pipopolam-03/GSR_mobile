@@ -21,7 +21,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -59,6 +61,8 @@ class GsrService : Service() {
 
     private var hc06Connected = false
     private var polarConnected = false
+    private var polarDataReceived = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -176,6 +180,7 @@ class GsrService : Service() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 polarConnected = true
+                polarDataReceived = false
                 sendUpdate()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                 checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
@@ -187,8 +192,10 @@ class GsrService : Service() {
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 polarConnected = false
+                polarDataReceived = false
                 polarControlCharacteristic = null
                 polarDataCharacteristic = null
+                mainHandler.removeCallbacksAndMessages(null)
                 sendUpdate()
             }
         }
@@ -281,7 +288,7 @@ class GsrService : Service() {
             if (descriptor.characteristic.uuid == pmdDataUuid) {
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     Log.i("GSR", "Polar data notifications enabled, starting ECG stream")
-                    startPolarEcgStream(gatt)
+                    startPolarEcgStream(gatt, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
                 } else {
                     Log.e("GSR", "Polar data CCCD write failed with status=$status")
                 }
@@ -297,6 +304,7 @@ class GsrService : Service() {
             if (characteristic.uuid == pmdControlUuid) {
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     Log.i("GSR", "Polar ECG start command acknowledged")
+                    schedulePolarRetry(gatt)
                 } else {
                     Log.e("GSR", "Polar ECG start command failed, status=$status")
                 }
@@ -325,11 +333,12 @@ class GsrService : Service() {
         }
         if (uuid != pmdDataUuid) return
 
+        polarDataReceived = true
         Log.d("GSR", "Polar data packet size=${value.size}, frameType=${if (value.isNotEmpty()) value[0].toInt() and 0xFF else -1}")
         parsePolarData(value)
     }
 
-    private fun startPolarEcgStream(gatt: BluetoothGatt) {
+    private fun startPolarEcgStream(gatt: BluetoothGatt, writeType: Int) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -344,7 +353,7 @@ class GsrService : Service() {
                 val result = gatt.writeCharacteristic(
                     control,
                     ecgStartCommand,
-                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    writeType
                 )
                 if (result != BluetoothStatusCodes.SUCCESS) {
                     Log.e("GSR", "Failed to send Polar ECG start command, status=$result")
@@ -353,7 +362,7 @@ class GsrService : Service() {
                 @Suppress("DEPRECATION")
                 run {
                     control.value = ecgStartCommand
-                    control.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    control.writeType = writeType
                     val ok = gatt.writeCharacteristic(control)
                     if (!ok) {
                         Log.e("GSR", "Failed to send Polar ECG start command (legacy)")
@@ -363,6 +372,16 @@ class GsrService : Service() {
         } catch (se: SecurityException) {
             Log.e("GSR", "Polar ECG start permission error", se)
         }
+    }
+
+
+    private fun schedulePolarRetry(gatt: BluetoothGatt) {
+        mainHandler.postDelayed({
+            if (!polarDataReceived && polarConnected) {
+                Log.w("GSR", "No Polar data after start command, retrying with WRITE_TYPE_NO_RESPONSE")
+                startPolarEcgStream(gatt, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+            }
+        }, 2000)
     }
 
     private fun connectPolar() {
@@ -435,6 +454,7 @@ class GsrService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        mainHandler.removeCallbacksAndMessages(null)
         try {
             socket?.close()
         } catch (_: Exception) {
