@@ -50,6 +50,7 @@ class GsrService : Service() {
 
 
     private var polarControlCharacteristic: BluetoothGattCharacteristic? = null
+    private var polarDataCharacteristic: BluetoothGattCharacteristic? = null
 
     private var socket: BluetoothSocket? = null
     private var bluetoothGatt: BluetoothGatt? = null
@@ -186,6 +187,8 @@ class GsrService : Service() {
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 polarConnected = false
+                polarControlCharacteristic = null
+                polarDataCharacteristic = null
                 sendUpdate()
             }
         }
@@ -209,24 +212,26 @@ class GsrService : Service() {
                 }
 
                 polarControlCharacteristic = control
-                gatt.setCharacteristicNotification(data, true)
-                val descriptor = data.getDescriptor(cccdUuid) ?: run {
-                    Log.e("GSR", "Polar data CCCD descriptor not found")
+                polarDataCharacteristic = data
+
+                gatt.setCharacteristicNotification(control, true)
+                val controlDescriptor = control.getDescriptor(cccdUuid) ?: run {
+                    Log.e("GSR", "Polar control CCCD descriptor not found")
                     return
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val result = gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                    val result = gatt.writeDescriptor(controlDescriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
                     if (result != BluetoothStatusCodes.SUCCESS) {
-                        Log.e("GSR", "Failed to write Polar data CCCD, status=$result")
+                        Log.e("GSR", "Failed to write Polar control CCCD, status=$result")
                     }
                 } else {
                     @Suppress("DEPRECATION")
                     run {
-                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                        val ok = gatt.writeDescriptor(descriptor)
+                        controlDescriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        val ok = gatt.writeDescriptor(controlDescriptor)
                         if (!ok) {
-                            Log.e("GSR", "Failed to write Polar data CCCD (legacy)")
+                            Log.e("GSR", "Failed to write Polar control CCCD (legacy)")
                         }
                     }
                 }
@@ -237,7 +242,43 @@ class GsrService : Service() {
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             super.onDescriptorWrite(gatt, descriptor, status)
-            if (descriptor.uuid == cccdUuid && descriptor.characteristic.uuid == pmdDataUuid) {
+            if (descriptor.uuid != cccdUuid) return
+
+            if (descriptor.characteristic.uuid == pmdControlUuid) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    Log.e("GSR", "Polar control CCCD write failed with status=$status")
+                    return
+                }
+
+                val data = polarDataCharacteristic ?: run {
+                    Log.e("GSR", "Polar data characteristic is null while enabling notifications")
+                    return
+                }
+                gatt.setCharacteristicNotification(data, true)
+                val dataDescriptor = data.getDescriptor(cccdUuid) ?: run {
+                    Log.e("GSR", "Polar data CCCD descriptor not found")
+                    return
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    val result = gatt.writeDescriptor(dataDescriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                    if (result != BluetoothStatusCodes.SUCCESS) {
+                        Log.e("GSR", "Failed to write Polar data CCCD, status=$result")
+                    }
+                } else {
+                    @Suppress("DEPRECATION")
+                    run {
+                        dataDescriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        val ok = gatt.writeDescriptor(dataDescriptor)
+                        if (!ok) {
+                            Log.e("GSR", "Failed to write Polar data CCCD (legacy)")
+                        }
+                    }
+                }
+                return
+            }
+
+            if (descriptor.characteristic.uuid == pmdDataUuid) {
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     Log.i("GSR", "Polar data notifications enabled, starting ECG stream")
                     startPolarEcgStream(gatt)
@@ -265,7 +306,7 @@ class GsrService : Service() {
         @Deprecated("Deprecated in Android API 33")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             @Suppress("DEPRECATION")
-            parsePolarData(characteristic.value)
+            onPolarCharacteristicChanged(characteristic.uuid, characteristic.value)
         }
 
         override fun onCharacteristicChanged(
@@ -273,8 +314,19 @@ class GsrService : Service() {
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-            parsePolarData(value)
+            onPolarCharacteristicChanged(characteristic.uuid, value)
         }
+    }
+
+    private fun onPolarCharacteristicChanged(uuid: UUID, value: ByteArray) {
+        if (uuid == pmdControlUuid) {
+            Log.i("GSR", "Polar control notification: ${value.joinToString(separator = " ") { b -> "%02X".format(b) }}")
+            return
+        }
+        if (uuid != pmdDataUuid) return
+
+        Log.d("GSR", "Polar data packet size=${value.size}, frameType=${if (value.isNotEmpty()) value[0].toInt() and 0xFF else -1}")
+        parsePolarData(value)
     }
 
     private fun startPolarEcgStream(gatt: BluetoothGatt) {
