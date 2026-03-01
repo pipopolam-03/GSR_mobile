@@ -1,0 +1,49 @@
+:root { color-scheme: light dark; }
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  background: #111827;
+  color: #e5e7eb;
+}
+.container {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 20px;
+}
+.card {
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 10px;
+}
+button, input {
+  border-radius: 8px;
+  border: 1px solid #4b5563;
+  background: #111827;
+  color: #e5e7eb;
+  padding: 8px 12px;
+}
+button { cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.status { opacity: 0.9; }
+.hint { font-size: 0.9rem; opacity: 0.8; }
+#log {
+  margin: 0;
+  min-height: 160px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+}

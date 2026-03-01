@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>GSR + Polar Web Monitor</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>GSR + Polar Web Monitor</h1>
+
+      <section class="card">
+        <h2>Подключение</h2>
+        <div class="row">
+          <button id="connectPolarBtn">Подключить Polar (Web Bluetooth)</button>
+          <span id="polarStatus" class="status">Polar: не подключен</span>
+        </div>
+        <div class="row">
+          <input id="hc06WsUrl" value="ws://localhost:8765" />
+          <button id="connectHc06Btn">Подключить HC-06 bridge</button>
+          <span id="hc06Status" class="status">HC-06: не подключен</span>
+        </div>
+        <p class="hint">
+          Веб-браузер не умеет напрямую работать с HC-06 (Bluetooth Classic/SPP),
+          поэтому нужен локальный bridge (WebSocket).
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Данные</h2>
+        <div class="grid">
+          <div><strong>GSR:</strong> <span id="gsrValue">—</span></div>
+          <div><strong>ECG:</strong> <span id="ecgValue">—</span></div>
+        </div>
+        <div class="row">
+          <button id="startRecBtn">Начать запись</button>
+          <button id="stopRecBtn" disabled>Остановить запись</button>
+          <button id="downloadBtn" disabled>Скачать CSV</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Лог</h2>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
