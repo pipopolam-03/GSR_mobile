@@ -13,18 +13,13 @@
       <section class="card">
         <h2>Подключение</h2>
         <div class="row">
-          <button id="connectPolarBtn">Подключить Polar (Web Bluetooth)</button>
-          <span id="polarStatus" class="status">Polar: не подключен</span>
+          <input id="backendWsUrl" value="ws://localhost:8765" />
+          <button id="connectBackendBtn">Подключиться к backend</button>
         </div>
-        <div class="row">
-          <input id="hc06WsUrl" value="ws://localhost:8765" />
-          <button id="connectHc06Btn">Подключить HC-06 bridge</button>
-          <span id="hc06Status" class="status">HC-06: не подключен</span>
+        <div class="grid">
+          <div id="polarStatus" class="status">Polar: не подключен</div>
+          <div id="hc06Status" class="status">HC-06: не подключен</div>
         </div>
-        <p class="hint">
-          Веб-браузер не умеет напрямую работать с HC-06 (Bluetooth Classic/SPP),
-          поэтому нужен локальный bridge (WebSocket).
-        </p>
       </section>
 
       <section class="card">
@@ -32,11 +27,6 @@
         <div class="grid">
           <div><strong>GSR:</strong> <span id="gsrValue">—</span></div>
           <div><strong>ECG:</strong> <span id="ecgValue">—</span></div>
-        </div>
-        <div class="row">
-          <button id="startRecBtn">Начать запись</button>
-          <button id="stopRecBtn" disabled>Остановить запись</button>
-          <button id="downloadBtn" disabled>Скачать CSV</button>
         </div>
       </section>
 

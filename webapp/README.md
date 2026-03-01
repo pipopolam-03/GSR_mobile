@@ -1,21 +1,22 @@
-# Web app: GSR + Polar
+# Web app + backend
 
-Базовое веб-приложение с UI для:
-- Polar ECG через **Web Bluetooth** (PMD service/control/data).
-- GSR (HC-06) через **WebSocket bridge** (браузер не умеет прямой Bluetooth Classic SPP).
-- Совместной записи в один CSV (`timestamp,gsr,ecg`).
+Новая архитектура:
+- `backend/server.py` — **один файл** с подключением к Polar (bleak) и HC-06 (serial),
+  записью в общий CSV (`timestamp,gsr,ecg`) и трансляцией live-данных по WebSocket.
+- `webapp/` — простой UI-клиент, который получает статусы/данные от backend.
 
-## Быстрый старт
+## Запуск backend
+```bash
+python3 backend/server.py --hc06-port /dev/rfcomm0 --hc06-baud 9600 --ws-port 8765 --out data/gsr_polar.csv
+```
+
+## Запуск web UI
 ```bash
 python3 -m http.server 8080 --directory webapp
 ```
-Откройте `http://localhost:8080` в Chromium/Chrome.
+Открыть `http://localhost:8080`.
 
-## Ограничения
-- Для Polar нужен браузер с Web Bluetooth.
-- Для HC-06 нужен внешний bridge, который публикует GSR по WebSocket.
-
-## Формат входящих данных HC-06 bridge
-Поддерживаются:
-- JSON: `{"gsr": 512}`
-- Текст: `GSR:512`
+## Зависимости backend
+- `bleak`
+- `websockets`
+- `pyserial`
