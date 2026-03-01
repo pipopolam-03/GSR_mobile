@@ -62,6 +62,8 @@ class GsrService : Service() {
     private var hc06Connected = false
     private var polarConnected = false
     private var polarDataReceived = false
+    private var polarStartRetryCount = 0
+    private val maxPolarStartRetries = 2
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -69,6 +71,14 @@ class GsrService : Service() {
     private fun bluetoothAdapterOrNull(): BluetoothAdapter? {
         val manager = getSystemService(BluetoothManager::class.java) ?: return null
         return manager.adapter
+    }
+
+    private fun cccdEnableValueFor(characteristic: BluetoothGattCharacteristic): ByteArray {
+        return if ((characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0) {
+            BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+        } else {
+            BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        }
     }
 
     override fun onCreate() {
@@ -181,6 +191,7 @@ class GsrService : Service() {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 polarConnected = true
                 polarDataReceived = false
+                polarStartRetryCount = 0
                 sendUpdate()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                 checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
@@ -193,6 +204,7 @@ class GsrService : Service() {
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 polarConnected = false
                 polarDataReceived = false
+                polarStartRetryCount = 0
                 polarControlCharacteristic = null
                 polarDataCharacteristic = null
                 mainHandler.removeCallbacksAndMessages(null)
@@ -228,14 +240,14 @@ class GsrService : Service() {
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val result = gatt.writeDescriptor(controlDescriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                    val result = gatt.writeDescriptor(controlDescriptor, cccdEnableValueFor(control))
                     if (result != BluetoothStatusCodes.SUCCESS) {
                         Log.e("GSR", "Failed to write Polar control CCCD, status=$result")
                     }
                 } else {
                     @Suppress("DEPRECATION")
                     run {
-                        controlDescriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        controlDescriptor.value = cccdEnableValueFor(control)
                         val ok = gatt.writeDescriptor(controlDescriptor)
                         if (!ok) {
                             Log.e("GSR", "Failed to write Polar control CCCD (legacy)")
@@ -268,14 +280,14 @@ class GsrService : Service() {
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val result = gatt.writeDescriptor(dataDescriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                    val result = gatt.writeDescriptor(dataDescriptor, cccdEnableValueFor(data))
                     if (result != BluetoothStatusCodes.SUCCESS) {
                         Log.e("GSR", "Failed to write Polar data CCCD, status=$result")
                     }
                 } else {
                     @Suppress("DEPRECATION")
                     run {
-                        dataDescriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        dataDescriptor.value = cccdEnableValueFor(data)
                         val ok = gatt.writeDescriptor(dataDescriptor)
                         if (!ok) {
                             Log.e("GSR", "Failed to write Polar data CCCD (legacy)")
@@ -287,6 +299,7 @@ class GsrService : Service() {
 
             if (descriptor.characteristic.uuid == pmdDataUuid) {
                 if (status == BluetoothGatt.GATT_SUCCESS) {
+                    polarStartRetryCount = 0
                     Log.i("GSR", "Polar data notifications enabled, starting ECG stream")
                     startPolarEcgStream(gatt, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
                 } else {
@@ -334,6 +347,7 @@ class GsrService : Service() {
         if (uuid != pmdDataUuid) return
 
         polarDataReceived = true
+        polarStartRetryCount = maxPolarStartRetries
         Log.d("GSR", "Polar data packet size=${value.size}, frameType=${if (value.isNotEmpty()) value[0].toInt() and 0xFF else -1}")
         parsePolarData(value)
     }
@@ -377,10 +391,19 @@ class GsrService : Service() {
 
     private fun schedulePolarRetry(gatt: BluetoothGatt) {
         mainHandler.postDelayed({
-            if (!polarDataReceived && polarConnected) {
-                Log.w("GSR", "No Polar data after start command, retrying with WRITE_TYPE_NO_RESPONSE")
-                startPolarEcgStream(gatt, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+            if (!polarConnected || polarDataReceived) return@postDelayed
+
+            if (polarStartRetryCount >= maxPolarStartRetries) {
+                Log.e("GSR", "Polar ECG started but no data received after retries. Stop retrying.")
+                return@postDelayed
             }
+
+            polarStartRetryCount += 1
+            Log.w(
+                "GSR",
+                "No Polar data after start command, retry ${polarStartRetryCount}/$maxPolarStartRetries with WRITE_TYPE_NO_RESPONSE"
+            )
+            startPolarEcgStream(gatt, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
         }, 2000)
     }
 
