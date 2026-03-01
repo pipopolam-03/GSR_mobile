@@ -37,6 +37,16 @@ class GsrService : Service() {
 
     private val uuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
+    private val pmdServiceUuid: UUID = UUID.fromString("FB005C80-02E7-F387-1CAD-8ACD2D8DF0C8")
+    private val pmdControlUuid: UUID = UUID.fromString("FB005C81-02E7-F387-1CAD-8ACD2D8DF0C8")
+    private val pmdDataUuid: UUID = UUID.fromString("FB005C82-02E7-F387-1CAD-8ACD2D8DF0C8")
+    private val cccdUuid: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+    private val ecgStartCommand = byteArrayOf(
+        0x02, 0x00, 0x00, 0x01, 0x82.toByte(),
+        0x00, 0x01, 0x01, 0x0E, 0x00
+    )
+
     private var socket: BluetoothSocket? = null
     private var bluetoothGatt: BluetoothGatt? = null
     private var csvStream: OutputStream? = null
@@ -181,11 +191,27 @@ class GsrService : Service() {
                 checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
             ) return
             try {
-                val service = gatt.getService(UUID.fromString("FB005C80-02E7-F387-1CAD-8ACD2D8DF0C8")) ?: return
-                val data = service.getCharacteristic(UUID.fromString("FB005C82-02E7-F387-1CAD-8ACD2D8DF0C8")) ?: return
+                val service = gatt.getService(pmdServiceUuid) ?: return
+                val control = service.getCharacteristic(pmdControlUuid) ?: return
+                val data = service.getCharacteristic(pmdDataUuid) ?: return
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    gatt.writeCharacteristic(
+                        control,
+                        ecgStartCommand,
+                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    run {
+                        control.value = ecgStartCommand
+                        control.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                        gatt.writeCharacteristic(control)
+                    }
+                }
 
                 gatt.setCharacteristicNotification(data, true)
-                val descriptor = data.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")) ?: return
+                val descriptor = data.getDescriptor(cccdUuid) ?: return
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
@@ -241,9 +267,10 @@ class GsrService : Service() {
         val step = 3
 
         while (offset + 2 < data.size) {
-            val ecg = (data[offset + 2].toInt() shl 16) or
+            val raw = (data[offset].toInt() and 0xFF) or
                 ((data[offset + 1].toInt() and 0xFF) shl 8) or
-                (data[offset].toInt() and 0xFF)
+                ((data[offset + 2].toInt() and 0xFF) shl 16)
+            val ecg = if (raw and 0x800000 != 0) raw or -0x1000000 else raw
             sendUpdate(ecg = ecg)
             offset += step
         }
