@@ -3,12 +3,14 @@ package com.example.gsr_mobile
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Button
 import android.widget.Switch
 import android.widget.TextView
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 class MainActivity : Activity() {
 
@@ -35,7 +37,7 @@ class MainActivity : Activity() {
 
         // Регистрируем BroadcastReceiver
         receiver = GsrUpdateReceiver(gsrText, ecgText, statusText, polarStatusText)
-        if (Build.VERSION.SDK_INT >= 33) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, GsrUpdateReceiver.intentFilter, RECEIVER_NOT_EXPORTED)
         } else {
             registerReceiver(receiver, GsrUpdateReceiver.intentFilter)
@@ -56,16 +58,27 @@ class MainActivity : Activity() {
     }
 
     private fun requestPermissions() {
-        val perms = mutableListOf(
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.BLUETOOTH_SCAN,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
+        val perms = mutableListOf<String>()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            perms.add(Manifest.permission.BLUETOOTH_CONNECT)
+            perms.add(Manifest.permission.BLUETOOTH_SCAN)
+        }
+
+        perms.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        perms.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             perms.add(Manifest.permission.FOREGROUND_SERVICE)
         }
-        ActivityCompat.requestPermissions(this, perms.toTypedArray(), 1)
+
+        val missingPerms = perms.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (missingPerms.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missingPerms.toTypedArray(), 1)
+        }
     }
 
     override fun onDestroy() {
