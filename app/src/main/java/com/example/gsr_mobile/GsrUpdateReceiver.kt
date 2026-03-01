@@ -3,6 +3,7 @@ package com.example.gsr_mobile
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.widget.TextView
 
 class GsrUpdateReceiver(
@@ -13,7 +14,8 @@ class GsrUpdateReceiver(
 ) : BroadcastReceiver() {
 
     companion object {
-        val intentFilter = android.content.IntentFilter("GSR_UPDATE")
+        const val ACTION_GSR_UPDATE = "com.example.gsr_mobile.GSR_UPDATE"
+        val intentFilter = IntentFilter(ACTION_GSR_UPDATE)
     }
 
     override fun onReceive(context: Context?, intent: Intent?) {
