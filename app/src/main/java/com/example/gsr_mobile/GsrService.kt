@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.*
@@ -65,12 +66,12 @@ class GsrService : Service() {
     }
 
     private fun sendUpdate(gsr: Int? = null, ecg: Int? = null) {
-        val intent = Intent("GSR_UPDATE")
+        val intent = Intent(GsrUpdateReceiver.ACTION_GSR_UPDATE)
         intent.putExtra("hc06", hc06Connected)
         intent.putExtra("polar", polarConnected)
         gsr?.let { intent.putExtra("gsr", it) }
         ecg?.let { intent.putExtra("ecg", it) }
-        sendBroadcast(intent)
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
 
         if (recording) {
             val line = "${System.currentTimeMillis()},${gsr ?: ""},${ecg ?: ""}\n"
@@ -107,7 +108,14 @@ class GsrService : Service() {
                     parseHC06Line(line)
                 }
             }
-        } catch (e: Exception) { Log.e("GSR", "HC06 error", e) }
+        } catch (e: Exception) {
+            Log.e("GSR", "HC06 error", e)
+        } finally {
+            hc06Connected = false
+            sendUpdate()
+            try { socket?.close() } catch (_: Exception) {}
+            socket = null
+        }
     }
 
     private fun parseHC06Line(line: String) {
@@ -122,6 +130,9 @@ class GsrService : Service() {
                 sendUpdate()
                 if (!hasBtPermission()) return
                 gatt.discoverServices()
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                polarConnected = false
+                sendUpdate()
             }
         }
 
@@ -142,9 +153,15 @@ class GsrService : Service() {
 
     private fun connectPolar() {
         if (!hasBtPermission()) return
-        val adapter = BluetoothAdapter.getDefaultAdapter()
-        val device = adapter.getRemoteDevice(polarAddress)
-        bluetoothGatt = device.connectGatt(this, false, gattCallback)
+        try {
+            val adapter = BluetoothAdapter.getDefaultAdapter()
+            val device = adapter.getRemoteDevice(polarAddress)
+            bluetoothGatt = device.connectGatt(this, false, gattCallback)
+        } catch (e: Exception) {
+            Log.e("GSR", "Polar error", e)
+            polarConnected = false
+            sendUpdate()
+        }
     }
 
     private fun parsePolarData(data: ByteArray) {
