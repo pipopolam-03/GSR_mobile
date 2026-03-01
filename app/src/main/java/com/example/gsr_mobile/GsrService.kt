@@ -1,6 +1,7 @@
 package com.example.gsr_mobile
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -45,11 +46,6 @@ class GsrService : Service() {
     private var polarConnected = false
 
     override fun onBind(intent: Intent?): IBinder? = null
-
-    private fun hasBtPermission(): Boolean {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-    }
 
     private fun bluetoothAdapterOrNull(): BluetoothAdapter? {
         val manager = getSystemService(BluetoothManager::class.java) ?: return null
@@ -107,7 +103,9 @@ class GsrService : Service() {
 
     private fun connectHC06() {
         try {
-            if (!hasBtPermission()) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+            ) return
             val adapter = bluetoothAdapterOrNull() ?: return
             adapter.cancelDiscovery()
 
@@ -164,7 +162,9 @@ class GsrService : Service() {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 polarConnected = true
                 sendUpdate()
-                if (!hasBtPermission()) return
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+            ) return
                 try {
                     gatt.discoverServices()
                 } catch (se: SecurityException) {
@@ -177,7 +177,9 @@ class GsrService : Service() {
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            if (!hasBtPermission()) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+            ) return
             try {
                 val service = gatt.getService(UUID.fromString("FB005C80-02E7-F387-1CAD-8ACD2D8DF0C8")) ?: return
                 val data = service.getCharacteristic(UUID.fromString("FB005C82-02E7-F387-1CAD-8ACD2D8DF0C8")) ?: return
@@ -215,7 +217,9 @@ class GsrService : Service() {
     }
 
     private fun connectPolar() {
-        if (!hasBtPermission()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) return
         try {
             val adapter = bluetoothAdapterOrNull() ?: return
             val device: BluetoothDevice = adapter.getRemoteDevice(polarAddress)
@@ -245,6 +249,7 @@ class GsrService : Service() {
         }
     }
 
+    @SuppressLint("InlinedApi")
     private fun setupCsv() {
         val sdf = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault())
         val name = "GSR_${sdf.format(Date())}.csv"
