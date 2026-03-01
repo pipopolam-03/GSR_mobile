@@ -14,6 +14,7 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothSocket
+import android.bluetooth.BluetoothStatusCodes
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -46,6 +47,9 @@ class GsrService : Service() {
         0x02, 0x00, 0x00, 0x01, 0x82.toByte(),
         0x00, 0x01, 0x01, 0x0E, 0x00
     )
+
+
+    private var polarControlCharacteristic: BluetoothGattCharacteristic? = null
 
     private var socket: BluetoothSocket? = null
     private var bluetoothGatt: BluetoothGatt? = null
@@ -191,39 +195,70 @@ class GsrService : Service() {
                 checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
             ) return
             try {
-                val service = gatt.getService(pmdServiceUuid) ?: return
-                val control = service.getCharacteristic(pmdControlUuid) ?: return
-                val data = service.getCharacteristic(pmdDataUuid) ?: return
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    gatt.writeCharacteristic(
-                        control,
-                        ecgStartCommand,
-                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    run {
-                        control.value = ecgStartCommand
-                        control.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                        gatt.writeCharacteristic(control)
-                    }
+                val service = gatt.getService(pmdServiceUuid) ?: run {
+                    Log.e("GSR", "Polar PMD service not found")
+                    return
+                }
+                val control = service.getCharacteristic(pmdControlUuid) ?: run {
+                    Log.e("GSR", "Polar PMD control characteristic not found")
+                    return
+                }
+                val data = service.getCharacteristic(pmdDataUuid) ?: run {
+                    Log.e("GSR", "Polar PMD data characteristic not found")
+                    return
                 }
 
+                polarControlCharacteristic = control
                 gatt.setCharacteristicNotification(data, true)
-                val descriptor = data.getDescriptor(cccdUuid) ?: return
+                val descriptor = data.getDescriptor(cccdUuid) ?: run {
+                    Log.e("GSR", "Polar data CCCD descriptor not found")
+                    return
+                }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                    val result = gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                    if (result != BluetoothStatusCodes.SUCCESS) {
+                        Log.e("GSR", "Failed to write Polar data CCCD, status=$result")
+                    }
                 } else {
                     @Suppress("DEPRECATION")
                     run {
                         descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                        gatt.writeDescriptor(descriptor)
+                        val ok = gatt.writeDescriptor(descriptor)
+                        if (!ok) {
+                            Log.e("GSR", "Failed to write Polar data CCCD (legacy)")
+                        }
                     }
                 }
             } catch (se: SecurityException) {
                 Log.e("GSR", "Polar service discovery permission error", se)
+            }
+        }
+
+        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            super.onDescriptorWrite(gatt, descriptor, status)
+            if (descriptor.uuid == cccdUuid && descriptor.characteristic.uuid == pmdDataUuid) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    Log.i("GSR", "Polar data notifications enabled, starting ECG stream")
+                    startPolarEcgStream(gatt)
+                } else {
+                    Log.e("GSR", "Polar data CCCD write failed with status=$status")
+                }
+            }
+        }
+
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            super.onCharacteristicWrite(gatt, characteristic, status)
+            if (characteristic.uuid == pmdControlUuid) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    Log.i("GSR", "Polar ECG start command acknowledged")
+                } else {
+                    Log.e("GSR", "Polar ECG start command failed, status=$status")
+                }
             }
         }
 
@@ -239,6 +274,42 @@ class GsrService : Service() {
             value: ByteArray
         ) {
             parsePolarData(value)
+        }
+    }
+
+    private fun startPolarEcgStream(gatt: BluetoothGatt) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val control = polarControlCharacteristic ?: run {
+            Log.e("GSR", "Cannot start Polar ECG: control characteristic is null")
+            return
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val result = gatt.writeCharacteristic(
+                    control,
+                    ecgStartCommand,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                )
+                if (result != BluetoothStatusCodes.SUCCESS) {
+                    Log.e("GSR", "Failed to send Polar ECG start command, status=$result")
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                run {
+                    control.value = ecgStartCommand
+                    control.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    val ok = gatt.writeCharacteristic(control)
+                    if (!ok) {
+                        Log.e("GSR", "Failed to send Polar ECG start command (legacy)")
+                    }
+                }
+            }
+        } catch (se: SecurityException) {
+            Log.e("GSR", "Polar ECG start permission error", se)
         }
     }
 
@@ -263,6 +334,8 @@ class GsrService : Service() {
 
     private fun parsePolarData(data: ByteArray) {
         if (data.isEmpty()) return
+        if (data[0].toInt() != 0x00) return
+        if (data.size <= 10) return
         var offset = 10
         val step = 3
 
