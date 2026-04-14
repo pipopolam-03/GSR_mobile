@@ -3,18 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>GSR + Polar Web Monitor</title>
+    <title>Управление</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="container">
-      <h1>GSR + Polar Web Monitor</h1>
+      <h1>Управление датчиками</h1>
 
       <section class="card">
         <h2>Подключение</h2>
         <div class="row">
-          <input id="backendWsUrl" value="ws://localhost:8765" />
-          <button id="connectBackendBtn">Подключиться к backend</button>
+          <input id="backendWsUrl" value="ws://localhost:8001" />
+          <button id="connectBackendBtn">Поиск датчиков</button>
         </div>
         <div class="grid">
           <div id="polarStatus" class="status">Polar: не подключен</div>
@@ -28,14 +28,29 @@
           <div><strong>GSR:</strong> <span id="gsrValue">—</span></div>
           <div><strong>ECG:</strong> <span id="ecgValue">—</span></div>
         </div>
+        <button id="startRecordBtn">Начать запись</button>
+        <button id="stopRecordBtn">Остановить запись</button>
+        <button id="nextIntervalBtn">Сменить активность</button>
+        <span id="intervalValue">0</span>
+
+        <div id="recordIndicator">Recording stopped</div>
       </section>
 
       <section class="card">
-        <h2>Лог</h2>
+        <h2>Информация о подключении</h2>
         <pre id="log"></pre>
       </section>
     </main>
 
     <script type="module" src="./app.js"></script>
+
+    <div id="labelModal" style="display:none; position:fixed; top:20%; left:35%; background:white; padding:20px; border:1px solid black;">
+      <h3>Label activities</h3>
+
+      <div id="intervalForms"></div>
+
+      <button id="saveLabelsBtn">Save labels</button>
+    </div>
+
   </body>
 </html>
