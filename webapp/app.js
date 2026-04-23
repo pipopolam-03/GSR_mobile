@@ -7,6 +7,7 @@ const ui = {
 
   gsrValue: document.getElementById('gsrValue'),
   bpmValue: document.getElementById('bpmValue'),
+  ecgValue: document.getElementById('ecgValue'),
 
   log: document.getElementById('log'),
 
@@ -26,22 +27,18 @@ const ui = {
 let ws = null;
 
 function log(msg) {
-
   const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
-
   ui.log.textContent = `${line}\n${ui.log.textContent}`;
 }
 
 function showLabelModal(intervals) {
-
   ui.intervalForms.innerHTML = '';
 
   for (const i of intervals) {
-
     const row = document.createElement('div');
 
     row.innerHTML =
-      `Interval ${i}: 
+      `Interval ${i}:
        <input type="text" data-interval="${i}" placeholder="activity">`;
 
     ui.intervalForms.appendChild(row);
@@ -53,7 +50,6 @@ function showLabelModal(intervals) {
 function handlePayload(payload) {
 
   if (payload.type === 'status') {
-
     ui.hc06Status.textContent =
       `HC-06: ${payload.hc06 ? 'подключен' : 'не подключен'}`;
 
@@ -64,7 +60,6 @@ function handlePayload(payload) {
   }
 
   if (payload.type === 'recording') {
-
     ui.recordIndicator.textContent =
       payload.value ? '● Recording' : 'Recording stopped';
 
@@ -72,26 +67,25 @@ function handlePayload(payload) {
   }
 
   if (payload.type === 'interval') {
-
     ui.intervalValue.textContent = payload.value;
-
     return;
   }
 
   if (payload.type === 'label_intervals') {
-
     showLabelModal(payload.intervals);
-
     return;
   }
 
   if (payload.type === 'data') {
 
-    if (typeof payload.gsr === 'number')
-      ui.gsrValue.textContent = payload.gsr;
+    if (payload.gsr !== undefined)
+    ui.gsrValue.textContent = payload.gsr;
 
-    if (typeof payload.heart_rate === 'number')
+    if (payload.heart_rate !== undefined)
       ui.bpmValue.textContent = payload.heart_rate;
+
+    if (payload.ecg !== undefined)
+      ui.ecgValue.textContent = payload.ecg;
   }
 }
 
@@ -104,9 +98,7 @@ function connectBackend() {
   ws.onopen = () => log('Connected');
 
   ws.onmessage = (event) => {
-
     const payload = JSON.parse(event.data);
-
     handlePayload(payload);
   };
 
@@ -116,37 +108,27 @@ function connectBackend() {
 ui.connectBackendBtn.addEventListener('click', connectBackend);
 
 ui.startRecordBtn.addEventListener('click', () => {
-
   if (!ws) return;
-
   ws.send(JSON.stringify({ type: 'start_record' }));
 });
 
 ui.stopRecordBtn.addEventListener('click', () => {
-
   if (!ws) return;
-
   ws.send(JSON.stringify({ type: 'stop_record' }));
 });
 
 ui.nextIntervalBtn.addEventListener('click', () => {
-
   if (!ws) return;
-
   ws.send(JSON.stringify({ type: 'next_interval' }));
 });
 
 ui.saveLabelsBtn.addEventListener('click', () => {
 
   const inputs = ui.intervalForms.querySelectorAll('input');
-
   const labels = {};
 
   inputs.forEach(input => {
-
-    const interval = input.dataset.interval;
-
-    labels[interval] = input.value;
+    labels[input.dataset.interval] = input.value;
   });
 
   ws.send(JSON.stringify({
