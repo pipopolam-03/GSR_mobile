@@ -39,6 +39,7 @@ class Backend:
 
         self.last_gsr = None
         self.last_ecg = None
+        self.last_heart_rate = None
 
         self.polar_connected = False
         self.hc06_connected = False
@@ -74,18 +75,19 @@ class Backend:
         logging.info(f"Interval -> {self.interval}")
 
     async def write_row(self):
-        if not self.recording or self.out_csv is None:
-            return
-        if self.last_gsr is None or self.last_ecg is None:
-            return
-        async with self.csv_lock:
-            with self.out_csv.open("a", newline="", encoding="utf-8") as f:
-                csv.writer(f).writerow([
-                    int(time.time() * 1000),
-                    self.last_gsr,
-                    self.last_ecg,
-                    self.interval
-                ])
+            if not self.recording or self.out_csv is None:
+                return
+            if self.last_gsr is None or self.last_ecg is None:
+                return
+            async with self.csv_lock:
+                with self.out_csv.open("a", newline="", encoding="utf-8") as f:
+                    csv.writer(f).writerow([
+                        int(time.time() * 1000),
+                        self.last_gsr,
+                        self.last_ecg,
+                        self.interval,
+                        self.last_heart_rate or 0,   # доп. колонка ЧСС
+                    ])
 
     async def send_intervals(self):
         if self.out_csv is None:
@@ -207,6 +209,12 @@ class Backend:
                     with contextlib.suppress(Exception):
                         ser.close()
 
+    async def emit_heart_rate(self, hr_bpm: int):
+        # если захотите сохранять ЧСС в CSV — можно отдельное поле
+        self.last_heart_rate = hr_bpm
+        await self.write_row()
+        await self.broadcast({"type": "data", "heart_rate": hr_bpm})
+
     async def run_polar(self):
         while True:
             try:
@@ -222,15 +230,31 @@ class Backend:
                     self.polar_connected = True
                     await self.emit_status()
 
-                    async def on_data(_, payload):
-                        if not payload or payload[0] != 0x00:
-                            return
-                        for i in range(10, len(payload), 3):
-                            ecg = int.from_bytes(payload[i:i+3], "little", signed=True)
-                            await self.emit_ecg(ecg)
+                    # Heart Rate UUID (стандартный BLE HR)
+                    HR_SERVICE_UUID = "0000180d-0000-1000-8000-00805f9b34fb"
+                    HR_CHAR_UUID    = "00002a37-0000-1000-8000-00805f9b34fb"
 
-                    await client.write_gatt_char(PMD_CONTROL, ECG_WRITE, response=True)
-                    await client.start_notify(PMD_DATA, on_data)
+                    async def on_hr(_, payload: bytearray):
+                        if not payload:
+                            return
+                        flags = payload[0]
+                        offset = 1
+
+                        # 8‑бит или 16‑бит bpm
+                        if not (flags & 0x1):
+                            hr_bpm = payload[offset]
+                            offset += 1
+                        else:
+                            hr_bpm = int.from_bytes(payload[offset:offset+2], "little")
+                            offset += 2
+
+                        await self.emit_heart_rate(hr_bpm)
+
+                    # Подключаемся ТОЛЬКО к Heart Rate, без PMD/ECG
+                    hr_service = client.services.get_service(HR_SERVICE_UUID)
+                    hr_char    = hr_service.get_characteristic(HR_CHAR_UUID)
+
+                    await client.start_notify(hr_char, on_hr)
 
                     while client.is_connected:
                         await asyncio.sleep(1)

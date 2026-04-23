@@ -6,7 +6,7 @@ const ui = {
   hc06Status: document.getElementById('hc06Status'),
 
   gsrValue: document.getElementById('gsrValue'),
-  ecgValue: document.getElementById('ecgValue'),
+  bpmValue: document.getElementById('bpmValue'),
 
   log: document.getElementById('log'),
 
@@ -90,8 +90,8 @@ function handlePayload(payload) {
     if (typeof payload.gsr === 'number')
       ui.gsrValue.textContent = payload.gsr;
 
-    if (typeof payload.ecg === 'number')
-      ui.ecgValue.textContent = payload.ecg;
+    if (typeof payload.heart_rate === 'number')
+      ui.bpmValue.textContent = payload.heart_rate;
   }
 }
 
